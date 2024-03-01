@@ -2,7 +2,7 @@
 #Experiment with banwidth
 data(faithful, package = "datasets")
 dens = density(faithful$eruptions)
-hist(faithful$eruptions, prob=T, col="cyan")
+hist(faithful$eruptions, prob=T, col="deepskyblue")
 lines(dens, col="magenta")
 
 plot(density(faithful$eruptions, bw=0.1), type = 'l', col="orange", xlab="",

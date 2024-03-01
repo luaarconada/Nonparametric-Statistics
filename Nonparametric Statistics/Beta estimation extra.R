@@ -15,7 +15,7 @@ rug(x_transf)
 
 #Undo the transformation and plot the resulting estimation which should be better
 kde_transf = kde
-kde_transf$x = pnorm(kde_transf$x)
+kde_transf$x = pnorm(kde_transf$x) # reverse qnorm with pnorm
 kde_transf$y = 1/(dnorm(kde_transf$x))* kde_transf$y
 plot(kde_transf, col='red')
 curve(dbeta(x, shape1=2,shape2=2),add=T)

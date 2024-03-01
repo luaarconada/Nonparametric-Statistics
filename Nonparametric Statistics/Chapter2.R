@@ -292,7 +292,11 @@ samp <- rlnorm(n = 500)
 plot(density(samp), ylim = c(0, 0.8))
 curve(dlnorm(x), from = -2, to = 10, n = 500, col = 2, add = TRUE)
 rug(samp)
-
+###############################################3
+# t transformation: f(x) = g(t(x))*t'(x)
+# The transformation kde is obtained by replacing g with the usual kde,
+# but acting on the transformed data t(X1), . . . , t(Xn)
+# fT(x; h, t) :=(1/n)*Σ_{i=1}^{n} K_{h}(t(x) − t(Xi))t′(x).
 ## ---- transf-2--------------------------------------------------------------------------------------
 # kde with log-transformed data
 kde <- density(log(samp))
