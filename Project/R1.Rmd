@@ -1,0 +1,87 @@
+---
+title: "R1"
+author: "Alejandro Macías Pastor"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## R1. Consider regression of `mpg` on `cylinders` (ordered discrete), `horsepower`, `weight`, and `origin` in the data(`Auto`, package = ”ISLR”) dataset. Split the dataset by taking 300 (random) observations for the training dataset and use the remaining observations for the validation dataset. Then:
+
+```{r, warning = FALSE, message = FALSE}
+library(Metrics)
+library(np)
+data(Auto, package='ISLR')
+ind_train = sample(nrow(Auto), size=300)
+train = Auto[ind_train,]
+test = Auto[-ind_train,]
+```
+
+### (a) Fit the local constant and linear estimators with CV bandwidths by taking the nature of the variables into account. Hint: remember using `ordered` and `factor` if necessary.
+
+```{r}
+Auto$cylinders = ordered(Auto$cylinders)
+Auto$origin = factor(Auto$origin)
+
+bw.lc = npregbw(mpg ~ cylinders+horsepower+weight+origin, data=train, 
+             regtype='lc', bwmethod='cv.ls')
+
+fit.lc = npreg(bw.lc)
+```
+
+```{r}
+bw.ll = npregbw(mpg ~ cylinders+horsepower+weight+origin, data=train, 
+             regtype='ll', bwmethod='cv.ls')
+
+fit.ll = npreg(bw.ll)
+```
+PAGE 160
+
+### (b) Interpret the nonparametric fits via marginal effects (for the quantile 0.5) and bootstrap confidence intervals.
+
+```{r}
+plot(fit.lc, plot.errors.method = "asymptotic", plot.par.mfrow = FALSE, common.scale = FALSE)
+```
+
+```{r}
+plot(fit.lc, plot.errors.method = "bootstrap", plot.par.mfrow = FALSE, common.scale = FALSE)
+```
+
+ 
+```{r}
+plot(fit.ll, plot.errors.method = "asymptotic", plot.par.mfrow = FALSE, common.scale = FALSE)
+```
+
+```{r}
+plot(fit.ll, plot.errors.method = "bootstrap", plot.par.mfrow = FALSE, common.scale = FALSE)
+```
+
+### (c) Obtain the mean squared prediction error on the validation dataset for the two fits. Which estimate gives the lowest error?
+
+```{r}
+pred.lc = predict(fit.lc, newdata=test)
+pred.ll = predict(fit.ll, newdata=test)
+```
+
+```{r}
+mse(test$mpg, predicted=pred.lc)
+mse(test$mpg, predicted=pred.ll)
+```
+
+
+### (d) Compare the errors with the ones made by a linear estimation. Which approach gives lowest errors?
+
+```{r}
+lm.model = lm(mpg ~ cylinders+horsepower+weight+origin, data=train)
+pred.lm = predict(lm.model,newdata=test)
+```
+
+```{r}
+mse(test$mpg, predicted=pred.lm)
+```
+
+

@@ -1,0 +1,528 @@
+---
+title: "Project: Non-parametric statistics"
+author: "Lúa Arconada Manteca and Alejandro Macías Pastor"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message = FALSE, warning = FALSE}
+library(ks)
+library(nor1mix)
+library(ggplot2)
+library(reshape2)
+library(latex2exp)
+library(rotasym)
+library(Metrics)
+library(np)
+```
+
+## B3. Implement the $h_{\text{MISE}}$ using equations (2.23) and (2.33) for model `nor1mix::MW.nm8`. Then, compute by Monte Carlo the densities of $\hat{h}_{\text{DPI}}/h_{\text{MISE}}-1$, $\hat{h}_{\text{LCSV}}/h_{\text{MISE}}-1$ and $\hat{h}_{\text{BCV}}/h_{\text{MISE}}-1$. Compare them for $n=100,200,500$. Use the paper of Marron and Wand (1992). Describe in detail the results.
+
+The kernel density estimator majorly depends on the bandwidth. In order to measure the performance of an estimator for a given $h$ while also avoiding the dependence on the sample, the Mean Integrated Square Error is defined:
+
+$$ \text{MISE}[\hat{f}(\cdot;h)] = \int \text{MSE}[\hat{f}(x;h)] dx$$
+
+The aim is obviously to find a certain bandwidth such that the MISE is minimized:
+ 
+$$ h_{\text{MISE}} := \text{arg} \: \underset{h>0}{\text{min}} \; \text{MISE}[\hat{f}(\cdot;h)]$$
+In general, the MISE is not easily calculated directly, due to its design bias (it depends on $f''$), and so it is convenient to have alternatives for the bandwidth, such as the Least Squares Cross-Validation (LCSV) selector $h_{\text{LCSV}}$ or the Biased Cross-Validation (BCV) $h_{\text{BCV}}$. 
+
+A special case arises when considering normal r-mixtures of the form:
+
+$$f(x;\mu,\sigma,w) := \sum_{j=1}^{r} w_j \phi_{\sigma_j}(x-\mu_j)$$
+with $w_j \geq 0,\, j=1,\dotsc,r$ and $\sum_{j=1}^r w_j = 1$, since the analytical expression for the MISE can be obtained:
+
+$$ \text{MISE}_r[\hat{f}(\cdot;h)] = (2\sqrt{\pi}nh)^{-1} + \textbf{w}'\{(1-n^{-1})\Omega_2-2\Omega_1+\Omega_0\}\textbf{w}$$
+where
+
+$$ (\Omega_a)_{ij} = \phi_{(ah^2+\sigma_i^2+\sigma_j^2)^{1/2}}(\mu_i-\mu_j), \quad i,j=1,\dotsc,r $$
+and $\textbf{w} = (w_1,\dots,w_r)$.
+
+For the case of the skewed bimodal normal mixtures (identified as the 8th distribution in the article from Marron and Wan (1992), which can be used in `R` as `nor1mix::MW.nm8`), we have the following parameters: $r=2$, $\textbf{w}=\left(\frac{3}{4},\frac{1}{4}\right)$, $\mathbf{\mu} = \left(0,\frac{3}{2} \right)$ and $\mathbf{\sigma} = \left( 1, \frac{1}{3}\right)$.
+
+```{r}
+# defining parameters of nor1mix::MW.nm8
+r = 2
+w = as.matrix(c(3/4, 1/4))
+mus = c(0, 3/2)
+sigmas = c(1, 1/3)
+
+fill.omega <- function(a,r,mus,sigmas,h) {
+  omega = matrix(,nrow=r,ncol=r)
+  # calculates the specified Omega matrix according
+  # to the specified parameters
+  for (i in 1:r){
+    for (j in 1:r){
+      sd = sqrt(a*h^2+sigmas[i]^2+sigmas[j]^2)
+      omega[i,j] = dnorm(mus[i]-mus[j],sd=sd)
+    }
+  }
+  return(omega)
+}
+
+n = 100
+mise <- function(h,w,n){
+  # calculate the three necessary Omega matrices
+  omega.0 = fill.omega(0,r,mus,sigmas,h)
+  omega.1 = fill.omega(1,r,mus,sigmas,h)
+  omega.2 = fill.omega(2,r,mus,sigmas,h)
+  # calculate and return the MISE
+  1/(2*sqrt(pi)*n*h) + t(w) %*% ((1-1/n)*omega.2-2*omega.1+omega.0) %*% w 
+}
+```
+
+We can take a peek at how the MISE curve might look for this distribution:
+
+```{r}
+grid.h = seq(0.001, 1, by=1e-4)
+mise.values = c()
+n=100
+
+for (h in grid.h){
+  mise.h = mise(h,w=w,n=n)
+  mise.values = c(mise.values, mise.h)
+}
+```
+
+```{r}
+plot(x=grid.h, y=mise.values,
+     type='l', col='red',
+     ylab='MISE', xlab=TeX(r'(h)'),
+     main=TeX(r'(MISE for nor1mix::MW.nm8 ($n=100$))'),
+     )
+```
+As we can see, the curve seems to achieve a minimum value in between 0.2 and 0.4.
+
+```{r}
+h.mise <- function(n,w,interval){
+  # obtain h_MISE by numerically finding the minimum of the MISE function
+  opt = optimize(mise,interval=interval,w=w,n=n) 
+  return(opt$minimum)
+}
+
+hmise=h.mise(n,w,interval=c(0.001,1))
+hmise
+```
+That is, for a sample of size 100 of this distribution, the bandwidth thath minimizes the MISE is approximately $h_{\text{MISE}} \approx 0.32$.
+
+Apart from yielding different values, the different bandwidth selectors fulfill different convergence results, although all of the form:
+
+$$ n^{\nu} \left( \hat{h}/h_{\text{MISE}} -1 \right) \overset{d}{\longrightarrow} \mathcal{N} (0, \sigma^2) $$
+
+Specifically, for the Least Squares Cross-Validation and Biased Cross-Validation it holds that $n^{1/10} \left( \hat{h}_{LCSV}/h_{\text{MISE}} -1 \right) \overset{d}{\longrightarrow} \mathcal{N} (0, \sigma^2_{\text{LCSV}})$ and $n^{1/10} \left( \hat{h}_{BCV}/h_{\text{MISE}} -1 \right) \overset{d}{\longrightarrow} \mathcal{N} (0, \sigma^2_{BCV})$, with an approximate between the variances (for the normal kernel) of $\sigma^2_{\text{LCSV}}/\sigma^2_{\text{BCV}} \approx 15.7$. On the other hand, for the DPI selector it holds that $n^{5/14} \left( \hat{h}_{\text{DPI}}/h_{\text{MISE}} -1 \right) \overset{d}{\longrightarrow} \mathcal{N} (0, \sigma^2_{\text{DPI}})$, meaning that this selector has a much faster convergence rate than the cross-validation selectors. 
+
+In what follows, the convergence of three bandwidth selectors (DPI, LCSV and BCV) will be studied by computing the density of $h/h_{\text{MISE}}-1$ for each one through Monte Carlo techniques.
+
+```{r}
+n.sizes = c(100,200,500) # sizes given in the exercise
+
+mc.iters = 1000 # number of Monte Carlo simulations
+```
+
+### $\hat{h}_{\text{DPI}}$
+
+Let us start with the density of the relative error of the DPI selector:
+
+```{r}
+set.seed(123) # for reproducibility
+dpi.values = matrix(,nrow=mc.iters, ncol=length(n.sizes)) # h_DPI storage
+
+i = 1
+for (n in n.sizes){
+  # calculate h_MISE for the sample size
+  hmise = h.mise(n=n,w=w, interval=c(0.001,1))
+  
+  for (iter in 1:mc.iters){
+    # obtain a sample of size n from our skewed bimodal
+    x = nor1mix::rnorMix(n=n, obj=MW.nm8) 
+    # compute and store the relative error for the DPI selector
+    dpi.values[iter,i] = ks::hpi(x)/hmise-1
+  }
+  i = i+1
+}
+
+# store it as Data Frame with the sample size
+# as columns names for plotting purposes
+dpi.values= as.data.frame(dpi.values)
+names(dpi.values) = as.character(n.sizes)
+```
+
+
+```{r message=FALSE, warning=FALSE}
+# plot together the densities for the diffent sample sizes
+dpi.plot = melt(dpi.values)
+ggplot(aes(x=value, colour=variable), data=dpi.plot) + 
+  geom_density() +
+  labs(colour='Sample size', x =TeX(r'($h$)'),
+       title=TeX(r'(Density of $\hat{h}_{DPI}/h_{MISE}-1$)'))
+```
+As we can see in the plot, there are two main changes in the features of the densities as the sample size increases. Firstly, the peak of the density moves slightly to the left as the sample size increases, that is, closer to 0. Secondly, the width of the peak decreases as the sample size increases, which indicates the decrease in the variance of the distribution.
+
+
+### $\hat{h}_{LCSV}$
+
+We can continue with the relative error of the Least Squares Cross-Validation selector:
+
+```{r}
+set.seed(123) # for reproducibility
+lcsv.values = matrix(,nrow=mc.iters, ncol=length(n.sizes)) # to store h_LCSV values
+
+i = 1
+for (n in n.sizes){
+  # calculate h_MISE for the corresponding sample size
+  hmise = h.mise(n=n,w=w, interval=c(0.001,1))
+  
+  for (iter in 1:mc.iters){
+    # obtain a sample of the skewed bimodal for the corresponding sample size
+    x = nor1mix::rnorMix(n=n, obj=MW.nm8)
+    # calculate the relative error of the LCSV selector for the sample
+    lcsv.values[iter,i] = bw.ucv(x,lower=0.001,upper=1)/hmise-1
+  }
+  i = i+1
+}
+# store as Data Frame for plotting purposes
+lcsv.values= as.data.frame(lcsv.values)
+names(lcsv.values) = as.character(n.sizes)
+```
+
+```{r message=FALSE, warning=FALSE}
+lcsv.plot = melt(lcsv.values)
+ggplot(aes(x=value, colour=variable), data=lcsv.plot) + 
+  geom_density() +
+  labs(colour='Sample size', x ='h',
+       title=TeX(r'(Density of $\hat{h}_{LCSV}/h_{MISE}-1$)'))
+```
+In a similar manner to the previous case, as the sample size increases the decrease in the variability (variance) of the distribution is clear. Since the smallest density is already pretty much centered around 0, the peak of the distribution barely moves as the sample size increases. It should be noted that for the LCSV selector, the variance seems to be bigger than for the DPI selector.
+
+### $\hat{h}_{\text{BCV}}$
+
+Finally, we can repeat the same proces for the Biased Cross-Validation Selector:
+
+```{r, warning=FALSE, message=FALSE}
+set.seed(123) #for reproducibility
+bcv.values = matrix(,nrow=mc.iters, ncol=length(n.sizes)) # to store h_BCV values
+
+i = 1
+for (n in n.sizes){
+  # calculate h_MISE for the corresponding sample size
+  hmise = h.mise(n=n,w=w, interval=c(0.001,1))
+  
+  for (iter in 1:mc.iters){
+    # obtain a sample of the corresponding size from the skewed bimodal
+    x = nor1mix::rnorMix(n=n, obj=MW.nm8)
+    # calculate the relative error of the h_BCV selector
+    bcv.values[iter,i] = bw.bcv(x, lower=1e-6, upper=2)/hmise-1
+  }
+  i = i+1
+}
+
+# store as Data Frame for plotting purposes
+bcv.values= as.data.frame(bcv.values)
+names(bcv.values) = as.character(n.sizes)
+```
+
+
+```{r message=FALSE, warning=FALSE}
+bcv.plot = melt(bcv.values)
+ggplot(aes(x=value, colour=variable), data=bcv.plot) + 
+  geom_density() +
+  xlim(c(-0.5,2.5)) +
+  labs(colour='Sample size', x ='h',
+       title=TeX(r'(Density of $\hat{h}_{BCV}/h_{MISE}-1$)'))
+```
+When compared to the other two cases, the distribution of the relative error of the Biased Cross-Validation selector seems to change more drastically as the sample size increases, as there is a noticeable jump between sample sizes of 200 and 500. Nonetheless, the jumps is in the right direction, as the peak of the distribution moves much closer to 0 and the variance is reduced.
+
+
+All in all, we have seen that the convergence of the DPI selector is the fastest, at least in terms of the variance, as the asymptotic convergence results predicted.
+
+## D3. The dataset sunspots births from package `rotasym` contains the recorded sunspots births during 1872–2018 from the Debrecen Photoheliographic Data (DPD) catalog. The dataset presents 51, 303 sunspot records, featuring their positions in spherical coordinates ($\theta$ and $\phi$), sizes (total_area), and distances to the center of the solar disk (dist_sun_disc).
+
+Firstly, we load the dataset and print the first observations to see its structure.
+
+```{r, warning = FALSE}
+# Load the dataset named sunspots_births
+data <- sunspots_births
+
+# Display the first few rows of the dataset
+head(data)
+```
+
+### (a) Compute and plot the KDE for $\phi$ using the DPI selector. Describe the result.
+
+Firstly, we compute a histogram of the 'phi' data for reference.
+
+```{r}
+# Generate a histogram of the variable 'phi'
+hist(data$phi)
+```
+
+
+This exercise asks us to compute the kernel density estimation (KDE) for a variable labeled 'phi', employing the Sheather-Jones bandwidth selection method. Initially, the KDE is calculated using the `density()` function, specifying the 'phi' variable as the input data and setting the bandwidth parameter using the `bw.SJ()` function with the Sheather-Jones method. This process generates a smoothed estimate of the probability density function for the 'phi' variable.
+
+Lastly, the KDE is overlaid on top of the histogram using the lines() function, providing a comparison between the KDE and the histogram and aiding in the visual interpretation of the distribution of 'phi'. This combined approach allows for a comprehensive analysis of the distribution of 'phi', integrating both graphical representations to enhance insights into its characteristics.
+
+```{r}
+# Calculate kernel density estimation (KDE) for the variable phi using Sheather-Jones bandwidth selection
+kde <- density(data$phi, bw = bw.SJ(data$phi, method = 'dpi'))
+
+# Generate a histogram of the variable 'phi'
+hist(data$phi, freq = F)
+
+# Plot the KDE on top of the histogram
+lines(kde, lwd = 2, main = 'KDE of variable phi')
+```
+
+We can see that it is symmetric around 0 with all the data between -1 and 1 more or less. Moreover, we can observe that it is bimodal (relevant in the next exercise).
+
+Overall, this exercise facilitates the analysis and visualization of the kernel density estimation for the 'phi' variable, enabling insights into its underlying distribution and density characteristics.
+
+### (b) Compute and plot the kernel density derivative estimator for $\phi$ using the adequate DPI selector. Determine approximately the location of the main mode(s).
+
+In this code exercise, the objective is to compute the kernel density derivative estimation for a variable labeled 'phi'. Initially, we calculate this derivative estimation using the `kdde()` function, specifying the bandwidth parameter with the Sheather-Jones method through the `bw.SJ()` function. The derivative order is set to 1, indicating that the first derivative of the kernel density will be estimated. 
+
+Once the kernel density derivative estimation is computed, we proceed to create a plot visualizing the results. The x-axis of the plot is labeled as 'phi', representing the variable for which the density derivative is estimated. Additionally, the plot's title is set to "Density derivative estimation for phi" to provide context. The y-axis label is left empty for simplicity. 
+
+```{r}
+# Calculate kernel density derivative estimation for the variable phi 
+kdde_1 <- kdde(x = data$phi, h = bw.SJ(data$phi, method = 'dpi'), deriv.order = 1)
+
+# Plot the kernel density derivative estimation
+plot(kdde_1, xlab = 'phi', main = "Density derivative estimation for phi", ylab = '', lwd = 2)
+```
+
+The resulting plot displays the kernel density derivative estimation for the variable 'phi', allowing for visual interpretation of the density's rate of change across different values of 'phi'. The line width parameter is set to 2 for better visibility of the plot's elements. Overall, this part of the exercise facilitates the analysis and visualization of the density derivative estimation for the variable 'phi'.
+
+In this part of the exercise, the goal is to identify the mode or modes of the kernel density derivative estimation. Initially, we determine the x-coordinate corresponding to the maximum peak (mode) by finding the index of the maximum value in the estimated derivative values (`kdde_1$estimate`). This x-coordinate represents the value of the variable at which the density derivative achieves its maximum value. Similarly, the code also identifies the x-coordinate corresponding to the minimum peak by finding the index of the minimum value in the estimated derivative values. These x-coordinates are stored in variables `mode1` and `mode2`, respectively.
+
+Once the mode coordinates are identified, we output them to the console. The value stored in `mode1` corresponds to the x-coordinate of the maximum peak, representing one potential mode of the density derivative estimation. Similarly, the value stored in `mode2` corresponds to the x-coordinate of the minimum peak, which might indicate another mode or a point of inflection in the density function. We can see that both modes will be very close to 0 on each side, near 0.1 and -0.1.
+
+
+```{r}
+# Find the mode of the kernel density derivative estimation
+# Find the x-coordinate (value of the variable) corresponding to the maximum peak (mode)
+mode1 <- kdde_1$eval.points[which.max(kdde_1$estimate)]
+
+# Find the x-coordinate (value of the variable) corresponding to the minimum peak
+mode2 <- kdde_1$eval.points[which.min(kdde_1$estimate)]
+
+# Output the mode
+mode1  # Output the mode corresponding to the maximum peak
+mode2  # Output the mode corresponding to the minimum peak
+```
+
+In summary, this last part of the exercise facilitates the identification and output of mode coordinates in the kernel density derivative estimation, providing valuable insights into the distribution's characteristics and potential modes.
+
+### (c) Compute the log-transformed KDE for total area using the NS selector.
+
+We begin the code by applying a natural logarithm transformation to the 'total_area' variable from the dataset. This transformation is commonly employed in statistical analysis to address skewed distributions or stabilize variance. By taking the logarithm, the code aims to normalize the distribution of 'total_area' and prepare it for subsequent analysis.
+
+Following the logarithmic transformation, we proceed to compute the kernel density estimate (KDE) of the natural logarithm of 'total_area'. KDE is a non-parametric method used to estimate the probability density function of a random variable. In this context, the KDE represents the density of observations after the logarithmic transformation, providing insights into the distributional characteristics of the transformed variable.
+
+Afterwards, we determine the bandwidth parameter for the KDE using the Hansen method. Bandwidth selection is a crucial step in KDE as it influences the smoothness of the estimated density curve. By employing the Hansen method, the code optimizes the bandwidth parameter based on the characteristics of the data, ensuring an appropriate level of smoothness in the KDE.
+
+With the bandwidth determined, we recalculate the KDE of the natural logarithm of 'total_area' using the adjusted bandwidth. This step ensures that the KDE is optimized and accurately reflects the underlying density distribution of the transformed variable.
+
+Finally, we generate a plot to visualize the exponentiated KDE values, effectively transforming them back from the logarithmic scale. This visualization aids in understanding the distribution of 'total_area' after the logarithmic transformation and KDE estimation, facilitating further exploration and interpretation of the data.
+
+```{r}
+# Take the natural logarithm of the 'total_area' variable
+log <- log(data$total_area)
+
+# Calculate the kernel density estimate (KDE) of the natural logarithm of 'total_area'
+kdelog <- density(log)
+
+# Determine bandwidth using the Hansen method
+hns <- ks::hns(x = kdelog$x)
+
+# Calculate the kernel density estimate (KDE) of the natural logarithm of 'total_area' using the bandwidth from the Hansen method
+kdepost <- density(log, bw = hns)
+
+# Plot the exponentiated KDE values (transformed back from logarithmic scale)
+plot(exp(kdepost$y))
+```
+
+ Overall, this exercise represents a systematic approach to analyzing the density distribution of a transformed variable using KDE methodology.
+
+### (d) Draw the histogram of $M=10000$ samples simulated from the KDE obtained in (a).
+
+We are going to conduct a simulation-based analysis to explore the underlying distribution of a dataset using kernel density estimation (KDE) and generating samples from it. Initially, we calculated the KDE of the dataset to model its probability density function. Now, we will generate 10,000 samples from this KDE, ensuring that the sampling probability reflects the KDE's estimated density at each point. To visualize the distribution of these generated samples, we will construct a histogram with bins representing the frequency of occurrence of values.
+
+Additionally, we will overlay the density estimation line for the generated samples in red and the original KDE line in black onto the histogram plot. This allows us to compare the distribution of the generated samples with the original KDE, providing insights into how well the KDE represents the underlying distribution of the dataset. Lastly, we will include a legend to differentiate between the sample density and the original KDE in the plot, aiding in interpretation. 
+
+```{r}
+# Define the number of samples
+M <- 10000
+
+# Generate M samples from the KDE
+samples <- sample(x = kde$x, size = M, replace = TRUE, prob = kde$y)
+
+# Create a histogram of the generated samples
+hist(samples, freq = FALSE, col = 'lightblue', border = 'black', main = 'Histogram of 10,000 Samples from KDE', xlab = '', ylab = '')
+
+# Add density estimation lines for the generated samples and the original KDE
+lines(density(samples), col = 'red', lwd = 2)  # Density estimation for the samples
+lines(kde, col = 'black', lw = 2)  # Original KDE
+
+# Add legend
+legend("topright", legend = c("Sample Density", "KDE"), col = c("red", "black"), lty = 1, lwd = 2)
+```
+
+Through this analysis, we gained a deeper understanding of the dataset's distribution and the KDE's effectiveness in capturing its underlying structure.
+
+## R1. Consider regression of `mpg` on `cylinders` (ordered discrete), `horsepower`, `weight`, and `origin` in the data(`Auto`, package = ”ISLR”) dataset. Split the dataset by taking 300 (random) observations for the training dataset and use the remaining observations for the validation dataset. Then:
+
+```{r, warning = FALSE, message = FALSE}
+# Load the 'Auto' dataset from the 'ISLR' package
+data(Auto, package='ISLR')
+
+# Randomly sample indices for training data
+ind_train <- sample(nrow(Auto), size=300)
+
+# Create the training dataset based on the sampled indices
+train <- Auto[ind_train,]
+
+# Create the testing dataset using the remaining data
+test <- Auto[-ind_train,]
+```
+
+We load the 'Auto' dataset, which contains information about various automobile models, including attributes such as miles per gallon (mpg), horsepower, and vehicle weight. This dataset serves as the basis for subsequent analysis tasks, such as model training and evaluation.
+
+Next, we randomly select a subset of indices from the 'Auto' dataset to create a training dataset. This process involves sampling 300 indices from the dataset, effectively creating a representative subset of data points for model training purposes. The training dataset is crucial for fitting predictive models and estimating their parameters using machine learning algorithms.
+
+Finally, we construct a testing dataset by excluding the indices used for training from the original dataset. This ensures that the testing dataset contains independent data points that were not used during model training. The testing dataset is essential for evaluating the generalization performance of predictive models on unseen data and assessing their ability to make accurate predictions in real-world scenarios.
+
+### (a) Fit the local constant and linear estimators with CV bandwidths by taking the nature of the variables into account. Hint: remember using `ordered` and `factor` if necessary.
+
+Firstly, we convert the 'cylinders' variable into an ordered factor. This conversion aims to enforce a specific ordinal relationship among the levels of 'cylinders', potentially reflecting the hierarchical nature of the cylinder counts in automobiles, such as '4 cylinders', '6 cylinders', and '8 cylinders'.
+
+Secondly, we convert the 'origin' variable into a factor. This conversion treats 'origin' as a categorical variable with distinct levels, representing the geographical region where each automobile model was manufactured. By converting 'origin' into a factor, the code ensures that R interprets it as a qualitative variable rather than a numeric one.
+
+```{r}
+# Convert 'cylinders' to ordered factor
+Auto$cylinders = ordered(Auto$cylinders)
+
+# Convert 'origin' to factor
+Auto$origin = factor(Auto$origin)
+```
+
+Now, we perform local linear regression modeling on the 'Auto' dataset. 
+
+Firstly, we determine the bandwidth for local linear regression using cross-validation. This process involves specifying the response variable 'mpg' and predictor variables 'cylinders', 'horsepower', 'weight', and 'origin'. The 'regtype' parameter is set to 'lc' to indicate local linear regression, and the 'bwmethod' parameter is set to 'cv.ls', indicating cross-validation with least squares criterion for bandwidth selection.
+
+Secondly, we fit a local linear regression model using the determined bandwidth. The 'npregbw()' function calculates the bandwidth based on the specified parameters and dataset, and the resulting bandwidth value is used to fit the local linear regression model using the 'npreg()' function.
+
+```{r}
+# Determine bandwidth for local linear regression using cross-validation
+bw.lc = npregbw(mpg ~ cylinders + horsepower + weight + origin, 
+                data = train, regtype = 'lc', bwmethod = 'cv.ls')
+
+# Fit local linear regression model using determined bandwidth
+fit.lc = npreg(bw.lc)
+```
+
+Now, we perform local linear regression modeling on the 'Auto' dataset, with a distinct approach compared to the previous code chunk.
+
+Here, we determine the bandwidth for local linear regression using cross-validation, similar to the previous chunk However, the key difference lies in the 'regtype' parameter, which is set to 'll' instead of 'lc'. This indicates local linear regression with local polynomial fitting, as opposed to the solely linear approach used previously. Consequently, the bandwidth determination process considers local polynomial fitting, which allows for more flexible local regression modeling capturing potential non-linear relationships between the predictor variables ('cylinders', 'horsepower', 'weight', 'origin') and the response variable 'mpg'.
+
+Following bandwidth determination, we fit a local linear regression model using the determined bandwidth, similar to the previous snippet. However, in this case, the model is based on local polynomial fitting, which accommodates non-linear relationships more effectively than purely linear local regression.
+
+```{r}
+# Determine bandwidth for local linear regression using cross-validation
+bw.ll = npregbw(mpg ~ cylinders + horsepower + weight + origin, 
+                data = train, regtype = 'll', bwmethod = 'cv.ls')
+
+# Fit local linear regression model using determined bandwidth
+fit.ll = npreg(bw.ll)
+```
+
+### (b) Interpret the nonparametric fits via marginal effects (for the quantile 0.5) and bootstrap confidence intervals.
+
+We generate a plot representing the results of a local linear regression model fitted to the data. Specifically, the plot displays the regression curve along with asymptotic confidence intervals. The `plot.errors.method` parameter is set to "asymptotic" to indicate that the confidence intervals are computed asymptotically. The `common.scale` parameter is set to FALSE, implying that each confidence interval may have its own scale. Lastly, the `xq` parameter is set to 0.5, indicating that the plot should display the results for the quantile 0.5, the median of the predictor variable values. This plot provides a visual representation of the regression curve and associated uncertainty, offering insights into the relationship between the predictor variables and the response variable.
+
+```{r}
+# Plot local linear regression model with asymptotic confidence intervals
+plot(fit.lc, plot.errors.method = "asymptotic", plot.par.mfrow = FALSE, common.scale = FALSE, xq = 0.5)
+```
+
+We generate a plot depicting the results of a local linear regression model fitted to the data, similarly to the previous plot. However, in this plot, the confidence intervals are computed using the bootstrap resampling method, as specified by setting the `plot.errors.method` parameter to "bootstrap". This differs from the previous plot, where the confidence intervals were computed asymptotically. This plot provides an alternative representation of the regression curve with uncertainty estimates based on bootstrap resampling, offering insights into the relationship between the predictor variables and the response variable.
+
+```{r}
+# Plot local linear regression model with bootstrap confidence intervals
+plot(fit.lc, plot.errors.method = "bootstrap", plot.par.mfrow = FALSE, common.scale = FALSE)
+```
+
+We can repeat the same process using the local linear model.
+ 
+```{r}
+# Plot local polynomial regression model with asymptotic confidence intervals
+plot(fit.ll, plot.errors.method = "asymptotic", plot.par.mfrow = FALSE, common.scale = FALSE, xq = 0.5)
+```
+
+```{r}
+# Plot local polynomial regression model with bootstrap confidence intervals
+plot(fit.ll, plot.errors.method = "bootstrap", plot.par.mfrow = FALSE, common.scale = FALSE)
+```
+
+When comparing the estimated intervals for the two different models we see some common traits as well as some difference. The non-bootstrap confidence intervals for the marginal effect of the variable `horsepower` seems to diverge for higher values. This might be related to the lack of observations in said range. Both for local constant and local linear estimations this divergence is avoided when calculating the bootstrap confidence intervals. Opposed to this similarity, we see that for both kind of confidence intervals of the local constant estimation the interval seem to have more drastic changes as the value of the variable changes, not fully following the shape of the estimated curve. This does not happen in the local linear estimation, for which the confidene intervals adapt better to the shape of the estimated curve. 
+
+
+### (c) Obtain the mean squared prediction error on the validation dataset for the two fits. Which estimate gives the lowest error?
+
+We generate predictions for the test dataset using our distinct locally fitted regression models: a local linear regression model (`fit.lc`) and a local polynomial regression model (`fit.ll`). In the first line, predictions are computed using the local linear regression model, leveraging the characteristics of the test dataset. The resulting predictions are stored in the object `pred.lc`. Following this, the second line generates predictions utilizing the local polynomial regression model. Similar to the prior line, these predictions are based on the test dataset's attributes. The resulting predictions are stored in the object `pred.ll`.
+
+```{r}
+# Generate predictions using the fitted local linear regression model
+pred.lc = predict(fit.lc, newdata = test)
+
+# Generate predictions using the fitted local polynomial regression model
+pred.ll = predict(fit.ll, newdata = test)
+```
+
+We have computed the predicted values for the response variable `mpg` using both local linear regression and local polynomial regression models. Now, we are going to compute the mean squared error (MSE) for these predictions.
+
+The first MSE is computed for the predictions made by the local linear regression model. The mse() function takes the actual 'mpg' values from the test dataset (test$mpg) and the predicted values from the local linear regression model (pred.lc). The second one is calculated in the same way but taking the predictions generated by the local polynomial regression model.
+
+These calculations provide quantitative measures of the performance of each regression model in terms of their predictive accuracy on unseen data from the test dataset. Lower MSE values indicate better model performance, with predictions closer to the true values of 'mpg'.
+
+```{r}
+# Calculate the mean squared error (MSE) for predictions made by the local linear regression model
+mse(test$mpg, predicted = pred.lc)
+
+# Calculate the mean squared error (MSE) for predictions made by the local polynomial regression model
+mse(test$mpg, predicted = pred.ll)
+```
+
+We can see that the lowest MSE is giving by the local linear regression model. This outcome suggests that, on average, the predictions generated by the local linear regression model are closer to the true values of 'mpg' in the test dataset. Lower MSE values typically indicate better predictive performance, indicating that the local linear regression model may be more suitable for this particular prediction task.
+
+### (d) Compare the errors with the ones made by a linear estimation. Which approach gives lowest errors?
+
+We now fit a linear regression model to the training data and generate predictions using this model for the test dataset to be able to obtain the error and compare it with our two previous models.
+
+Firstly, we fit a linear regression model to the training data (`train`). The model is constructed using 'mpg' as the response variable and 'cylinders', 'horsepower', 'weight', and 'origin' as predictor variables. This model is stored in the object `lm.model`.
+
+Secondly, we generate predictions using the fitted linear regression model (`lm.model`) for the test dataset (`test`). The `predict()` function is used to generate these predictions based on the characteristics of the test dataset. The resulting predicted values are stored in the object `pred.lm`.
+
+```{r}
+# Fit a linear regression model using the training data
+lm.model = lm(mpg ~ cylinders + horsepower + weight + origin, data = train)
+
+# Generate predictions using the fitted linear regression model
+pred.lm = predict(lm.model, newdata = test)
+```
+
+Lastly, we compute the MSE to be able to compare it with the one from our two previous models.
+
+```{r}
+# Calculate the mean squared error (MSE) for predictions made by the linear regression model
+mse(test$mpg, predicted = pred.lm)
+```
+
+We can see that it is the highest, which suggests that this model's predictive accuracy is lower compared to the other ones. This outcome suggests that the linear regression model may not adequately capture the underlying relationships between the predictor variables ('cylinders', 'horsepower', 'weight', 'origin') and the response variable ('mpg').
+
+To sum up , the local linear regression model yields the lowest MSE, indicating better predictive accuracy compared to the other models. Following this, the local polynomial regression model performs slightly worse, as evidenced by its higher MSE. Finally, the linear regression model exhibits the highest MSE among the three models, suggesting the least accurate predictions on the test dataset.
+
+Therefore, based on the MSE comparison, the local linear regression model emerges as the most suitable model for performing regression on this dataset, followed by the local polynomial regression model, and lastly, the linear regression model.
